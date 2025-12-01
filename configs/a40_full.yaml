@@ -1,0 +1,39 @@
+# Full training config for A40 GPU (48GB VRAM)
+# Expected: ~24 hours training, ~40-45% on AGI-1
+
+model:
+  d_model: 512
+  n_heads: 4
+  n_layers: 2
+  n_recursions: 16
+  dropout: 0.0
+
+training:
+  batch_size: 128     # Larger batch for A40
+  epochs: 100
+  lr_trunk: 1.0e-4
+  lr_embed: 1.0e-2
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  grad_clip: 1.0
+  supervision_weights: "linear"  # Later steps weighted more
+  curriculum_start_recursions: 4
+  curriculum_full_recursions_epoch: 20
+
+data:
+  data_dir: "data/arc-agi-1"
+  augment_factor: 100
+  num_workers: 8
+
+checkpoint:
+  save_dir: "checkpoints/a40_full"
+  save_every: 10
+
+logging:
+  use_wandb: true
+  wandb_project: "trm-arc"
+  wandb_run_name: "a40-full-v1"
+
+hardware:
+  device: "cuda"
+  use_amp: true

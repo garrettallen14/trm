@@ -1,0 +1,49 @@
+# Base configuration for TRM training on ARC-AGI
+
+# Model Architecture
+model:
+  d_model: 512
+  n_heads: 4
+  n_layers: 2
+  n_recursions: 16
+  dropout: 0.0
+  max_grid_size: 32
+
+# Training
+training:
+  batch_size: 64
+  epochs: 100
+  lr_trunk: 1.0e-4
+  lr_embed: 1.0e-2  # 100x higher for embeddings
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  grad_clip: 1.0
+  
+  # Deep supervision
+  supervision_weights: "uniform"  # "uniform" or "linear"
+  
+  # Curriculum: gradually increase recursion depth
+  curriculum_start_recursions: 4
+  curriculum_full_recursions_epoch: 20
+
+# Data
+data:
+  data_dir: "data/arc-agi-1"
+  augment_factor: 100  # 8 dihedrals × ~12 color perms
+  num_workers: 4
+
+# Checkpointing
+checkpoint:
+  save_dir: "checkpoints"
+  save_every: 10
+
+# Logging
+logging:
+  use_wandb: false
+  wandb_project: "trm-arc"
+  wandb_run_name: null
+
+# Hardware
+hardware:
+  device: "auto"  # "cuda", "mps", "cpu", or "auto"
+  use_amp: true   # Automatic mixed precision (CUDA only)
