@@ -50,8 +50,8 @@ class SweepConfig:
     n_heads: int = 4
     n_layers: int = 2
     n_recursions: int = 8  # Full recursions
-    batch_size: int = 16  # Should work now with Flash Attention
-    grad_accum: int = 2  # Effective batch = 16 * 2 = 32
+    batch_size: int = 8  # Conservative for variable demo counts (up to 10)
+    grad_accum: int = 4  # Effective batch = 8 * 4 = 32
     lr_trunk: float = 1e-4
     lr_embed: float = 1e-2
     supervision_weights: str = "uniform"
