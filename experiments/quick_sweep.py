@@ -187,7 +187,7 @@ def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> 
     result = {
         "name": config.name,
         "config": asdict(config),
-        "final_loss": train_losses[-1],
+        "final_loss": train_losses[-1] if train_losses else float('inf'),
         "train_losses": train_losses,
         "val_accuracy": val_acc,
         "elapsed_seconds": elapsed,
@@ -197,6 +197,16 @@ def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> 
     print(f"  Final loss: {result['final_loss']:.4f}")
     print(f"  Val accuracy: {result['val_accuracy']:.2%}")
     print(f"  Time: {elapsed:.1f}s ({result['samples_per_second']:.1f} samples/s)")
+    
+    # Save incrementally so we don't lose results on crash
+    incremental_path = Path("experiments/sweep_incremental.jsonl")
+    incremental_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(incremental_path, "a") as f:
+        f.write(json.dumps(result) + "\n")
+    
+    # Cleanup
+    del model
+    clear_memory()
     
     return result
 
