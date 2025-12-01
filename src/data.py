@@ -365,7 +365,7 @@ def collate_fn(batch: list[dict]) -> dict:
     max_demos = max(len(demos) for demos in batch_demo_inputs)
     
     # Pad tasks with fewer demos using padding token grids
-    pad_grid = torch.full((max_h, max_w), tokenizer.pad_token, dtype=torch.long)
+    pad_grid = torch.full((max_h, max_w), tokenizer.PAD_TOKEN, dtype=torch.long)
     
     for b in range(len(batch)):
         while len(batch_demo_inputs[b]) < max_demos:
