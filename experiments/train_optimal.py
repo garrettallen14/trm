@@ -32,6 +32,13 @@ from tqdm import tqdm
 from src.model import TinyRecursiveModel
 from src.data import create_dataloader
 
+# Dashboard client (optional)
+try:
+    from dashboard.client import DashboardClient
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+
 
 def clear_memory():
     gc.collect()
@@ -44,6 +51,15 @@ def train(args):
     print(f"Device: {device}")
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name()}")
+    
+    # Dashboard client
+    dashboard = None
+    if args.dashboard and DASHBOARD_AVAILABLE:
+        try:
+            dashboard = DashboardClient(mode="http", url="http://localhost:3000")
+            print("Dashboard: connected to http://localhost:3000")
+        except Exception as e:
+            print(f"Dashboard: failed to connect ({e})")
     
     # Optimal config from sweeps
     config = {
@@ -165,6 +181,15 @@ def train(args):
                     "oom": oom_count
                 })
                 
+                # Update dashboard
+                if dashboard and n_batches % 10 == 0:
+                    dashboard.update(
+                        loss=loss.item() * config['grad_accum'],
+                        epoch=epoch,
+                        step=n_batches,
+                        oom_count=oom_count
+                    )
+                
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     oom_count += 1
@@ -222,6 +247,14 @@ def train(args):
         print(f"Epoch {epoch}: loss={avg_loss:.4f}, val_acc={val_acc:.2%}, "
               f"lr={current_lr:.2e}, time={epoch_time:.1f}s, oom={oom_count}")
         
+        # Log epoch to dashboard
+        if dashboard:
+            dashboard.log_epoch(
+                epoch=epoch,
+                train_loss=avg_loss,
+                val_accuracy=val_acc
+            )
+        
         # Save checkpoint if best
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -251,9 +284,10 @@ def main():
     parser = argparse.ArgumentParser(description="Train TRM with optimal hyperparameters")
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=1)  # Safe default
-    parser.add_argument("--grad_accum", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=8)  # Flash Attention allows higher batch
+    parser.add_argument("--grad_accum", type=int, default=4)  # Effective batch = 32
     parser.add_argument("--augment_factor", type=int, default=10)
+    parser.add_argument("--dashboard", action="store_true", help="Send metrics to dashboard")
     args = parser.parse_args()
     
     train(args)
