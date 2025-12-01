@@ -27,6 +27,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from src.model import TinyRecursiveModel
@@ -107,6 +108,11 @@ def train(args):
     # Cosine annealing scheduler
     scheduler = CosineAnnealingLR(optimizer, T_max=config["epochs"], eta_min=1e-6)
     
+    # Mixed precision scaler
+    scaler = GradScaler() if args.amp else None
+    if args.amp:
+        print("Using mixed precision (AMP)")
+    
     # Data
     train_loader = create_dataloader(
         data_dir=args.data_dir,
@@ -158,21 +164,34 @@ def train(args):
                 test_input = batch["test_input"].to(device)
                 test_output = batch["test_output"].to(device)
                 
-                loss_dict = model.compute_loss(
-                    demo_inputs, demo_outputs, test_input, test_output,
-                    n_recursions=config["n_recursions"],
-                    supervision_weights=config["supervision_weights"]
-                )
-                loss = loss_dict["total_loss"] / config["grad_accum"]
-                loss.backward()
+                # Forward pass with optional AMP
+                with autocast(enabled=args.amp):
+                    loss_dict = model.compute_loss(
+                        demo_inputs, demo_outputs, test_input, test_output,
+                        n_recursions=config["n_recursions"],
+                        supervision_weights=config["supervision_weights"]
+                    )
+                    loss = loss_dict["total_loss"] / config["grad_accum"]
+                
+                # Backward pass
+                if scaler:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
                 
                 accum_step += 1
                 epoch_loss += loss.item() * config["grad_accum"]
                 n_batches += 1
                 
                 if accum_step >= config["grad_accum"]:
-                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
+                    if scaler:
+                        scaler.unscale_(optimizer)
+                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
                     optimizer.zero_grad()
                     accum_step = 0
                 
@@ -293,8 +312,9 @@ def main():
     parser = argparse.ArgumentParser(description="Train TRM with optimal hyperparameters")
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=6)  # Sweet spot for A40 (uses ~35GB)
-    parser.add_argument("--grad_accum", type=int, default=5)  # Effective batch = 30
+    parser.add_argument("--batch_size", type=int, default=8)  # With AMP, can go higher
+    parser.add_argument("--grad_accum", type=int, default=4)  # Effective batch = 32
+    parser.add_argument("--amp", action="store_true", help="Use automatic mixed precision")
     parser.add_argument("--augment_factor", type=int, default=10)
     parser.add_argument("--dashboard", action="store_true", help="Send metrics to dashboard")
     args = parser.parse_args()
