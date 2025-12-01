@@ -183,11 +183,20 @@ def train(args):
                 
                 # Update dashboard
                 if dashboard and n_batches % 10 == 0:
+                    mem_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
+                    elapsed = time.time() - epoch_start
+                    throughput = (n_batches * config["batch_size"]) / elapsed if elapsed > 0 else 0
+                    
                     dashboard.update(
                         loss=loss.item() * config['grad_accum'],
                         epoch=epoch,
                         step=n_batches,
-                        oom_count=oom_count
+                        total_steps=len(train_loader),
+                        oom_count=oom_count,
+                        memory_gb=mem_gb,
+                        throughput=throughput,
+                        learning_rate=current_lr if 'current_lr' in dir() else config["lr_trunk"],
+                        recursion_depth=config["n_recursions"]
                     )
                 
             except RuntimeError as e:
@@ -284,8 +293,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train TRM with optimal hyperparameters")
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=8)  # Flash Attention allows higher batch
-    parser.add_argument("--grad_accum", type=int, default=4)  # Effective batch = 32
+    parser.add_argument("--batch_size", type=int, default=6)  # Sweet spot for A40 (uses ~35GB)
+    parser.add_argument("--grad_accum", type=int, default=5)  # Effective batch = 30
     parser.add_argument("--augment_factor", type=int, default=10)
     parser.add_argument("--dashboard", action="store_true", help="Send metrics to dashboard")
     args = parser.parse_args()
