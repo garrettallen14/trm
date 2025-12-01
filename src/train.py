@@ -68,6 +68,10 @@ class TrainConfig:
     wandb_project: str = "trm-arc"
     wandb_run_name: Optional[str] = None
     
+    # Dashboard
+    use_dashboard: bool = False
+    dashboard_port: int = 3000
+    
     # Hardware
     device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     use_amp: bool = True  # Automatic mixed precision
@@ -113,6 +117,26 @@ class Trainer:
         # Create save directory
         self.save_dir = Path(config.save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize dashboard
+        self.dashboard_client = None
+        if config.use_dashboard:
+            try:
+                from dashboard.server import run_server_background, metrics_store
+                from dashboard.client import DashboardClient
+                
+                # Start dashboard server in background
+                run_server_background(port=config.dashboard_port)
+                print(f"Dashboard running on http://0.0.0.0:{config.dashboard_port}")
+                
+                # Create client
+                self.dashboard_client = DashboardClient(mode="inprocess")
+                self.dashboard_client.update(
+                    status="waiting",
+                    total_epochs=config.epochs
+                )
+            except Exception as e:
+                print(f"Failed to start dashboard: {e}")
         
         # Initialize wandb
         if config.use_wandb and WANDB_AVAILABLE:
@@ -204,9 +228,14 @@ class Trainer:
         total_final_loss = 0.0
         total_entropy = 0.0
         n_batches = 0
+        epoch_start = time.time()
         
         # Get current recursion depth (curriculum)
         n_recursions = self._get_current_recursions(epoch)
+        
+        # Update dashboard with epoch info
+        if self.dashboard_client:
+            self.dashboard_client.update(epoch=epoch, n_recursions=n_recursions)
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch}")
         
@@ -277,6 +306,25 @@ class Trainer:
                     "train/lr": self.optimizer.param_groups[0]["lr"],
                     "step": self.global_step
                 })
+            
+            # Log to dashboard
+            if self.dashboard_client and self.global_step % 5 == 0:
+                memory_gb = 0.0
+                if self.device.type == "cuda":
+                    memory_gb = torch.cuda.memory_allocated() / 1e9
+                
+                self.dashboard_client.update(
+                    status="running",
+                    step=n_batches,
+                    total_steps=len(self.train_loader),
+                    loss=loss.item(),
+                    final_loss=loss_dict["final_loss"].item(),
+                    attn_entropy=loss_dict["attn_entropy"].item(),
+                    n_recursions=n_recursions,
+                    lr=self.optimizer.param_groups[0]["lr"],
+                    samples_per_sec=config.batch_size / (time.time() - epoch_start) * n_batches if n_batches > 0 else 0,
+                    memory_gb=memory_gb
+                )
         
         return {
             "loss": total_loss / n_batches,
@@ -403,11 +451,24 @@ class Trainer:
                     "time/epoch": epoch_time
                 })
             
+            # Log epoch to dashboard
+            if self.dashboard_client:
+                self.dashboard_client.log_epoch(
+                    epoch=epoch,
+                    train_loss=metrics["loss"],
+                    val_loss=metrics["val_loss"],
+                    val_accuracy=metrics["val_accuracy"]
+                )
+            
             # Save
             self.save_checkpoint(epoch, metrics)
         
         total_time = time.time() - start_time
         print(f"\nTraining complete! Total time: {total_time/3600:.2f} hours")
+        
+        # Update dashboard with completion
+        if self.dashboard_client:
+            self.dashboard_client.update(status="completed")
         
         if config.use_wandb and WANDB_AVAILABLE:
             wandb.finish()

@@ -23,7 +23,7 @@ echo "Creating virtual environment..."
 uv venv
 
 echo "Installing dependencies..."
-uv pip install torch numpy einops tqdm pyyaml matplotlib seaborn wandb
+uv pip install torch numpy einops tqdm pyyaml matplotlib seaborn wandb fastapi uvicorn
 
 # Clone ARC data if not present
 if [ ! -d "data/arc-agi-1" ]; then

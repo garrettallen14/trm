@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRM Training Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --border: #e9ecef;
+            --text: #212529;
+            --text-secondary: #6c757d;
+            --accent: #228be6;
+            --success: #40c057;
+            --warning: #fab005;
+            --error: #fa5252;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+        }
+        
+        .status-dot.running { background: var(--success); }
+        .status-dot.waiting { background: var(--warning); }
+        .status-dot.completed { background: var(--accent); }
+        .status-dot.error { background: var(--error); }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        .card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+        }
+        
+        .card-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+        
+        .card-value {
+            font-size: 1.75rem;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+        }
+        
+        .card-value.small {
+            font-size: 1.25rem;
+        }
+        
+        .card-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        
+        .progress-section {
+            margin-bottom: 2rem;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+            .charts { grid-template-columns: 1fr; }
+        }
+        
+        .chart-card {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+        }
+        
+        .chart-title {
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+        
+        .chart-container {
+            height: 200px;
+            position: relative;
+        }
+        
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+        
+        .log-section {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+        }
+        
+        .log-title {
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 1rem;
+        }
+        
+        .log-entries {
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.75rem;
+            line-height: 1.6;
+            color: var(--text-secondary);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .log-entry {
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        
+        .log-time {
+            color: var(--text-secondary);
+            margin-right: 1rem;
+        }
+        
+        footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TRM Training</h1>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </header>
+        
+        <div class="progress-section">
+            <div class="progress-header">
+                <span>Epoch <span id="currentEpoch">0</span> / <span id="totalEpochs">100</span></span>
+                <span id="etaText">--</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Loss</div>
+                <div class="card-value" id="lossValue">--</div>
+                <div class="card-sub">Training loss</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Accuracy</div>
+                <div class="card-value" id="accValue">--</div>
+                <div class="card-sub">Validation</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Throughput</div>
+                <div class="card-value small" id="throughputValue">--</div>
+                <div class="card-sub">samples/sec</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Memory</div>
+                <div class="card-value small" id="memoryValue">--</div>
+                <div class="card-sub">GPU GB</div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <div class="card-label">Learning Rate</div>
+                <div class="card-value small" id="lrValue">--</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Recursion Depth</div>
+                <div class="card-value small" id="recValue">--</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Attention Entropy</div>
+                <div class="card-value small" id="entropyValue">--</div>
+            </div>
+            <div class="card">
+                <div class="card-label">Elapsed</div>
+                <div class="card-value small" id="elapsedValue">--</div>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="chart-card">
+                <div class="chart-title">Loss over Epochs</div>
+                <div class="chart-container">
+                    <canvas id="lossChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <div class="chart-title">Validation Accuracy</div>
+                <div class="chart-container">
+                    <canvas id="accChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <div class="log-section">
+            <div class="log-title">Training Log</div>
+            <div class="log-entries" id="logEntries">
+                <div class="log-entry">Waiting for training to start...</div>
+            </div>
+        </div>
+        
+        <footer>
+            TRM Dashboard &middot; Refresh rate: real-time via SSE
+        </footer>
+    </div>
+    
+    <script>
+        // Simple chart drawing (no dependencies)
+        class SimpleChart {
+            constructor(canvas, options = {}) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.data = [];
+                this.options = {
+                    lineColor: options.lineColor || '#228be6',
+                    fillColor: options.fillColor || 'rgba(34, 139, 230, 0.1)',
+                    ...options
+                };
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+            }
+            
+            resize() {
+                const rect = this.canvas.parentElement.getBoundingClientRect();
+                this.canvas.width = rect.width * window.devicePixelRatio;
+                this.canvas.height = rect.height * window.devicePixelRatio;
+                this.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+                this.draw();
+            }
+            
+            update(data) {
+                this.data = data.filter(d => d !== null && d !== undefined);
+                this.draw();
+            }
+            
+            draw() {
+                const ctx = this.ctx;
+                const rect = this.canvas.parentElement.getBoundingClientRect();
+                const width = rect.width;
+                const height = rect.height;
+                const padding = 10;
+                
+                ctx.clearRect(0, 0, width, height);
+                
+                if (this.data.length < 2) {
+                    ctx.fillStyle = '#6c757d';
+                    ctx.font = '12px -apple-system, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Waiting for data...', width / 2, height / 2);
+                    return;
+                }
+                
+                const min = Math.min(...this.data);
+                const max = Math.max(...this.data);
+                const range = max - min || 1;
+                
+                const xStep = (width - padding * 2) / (this.data.length - 1);
+                
+                // Draw fill
+                ctx.beginPath();
+                ctx.moveTo(padding, height - padding);
+                this.data.forEach((d, i) => {
+                    const x = padding + i * xStep;
+                    const y = height - padding - ((d - min) / range) * (height - padding * 2);
+                    ctx.lineTo(x, y);
+                });
+                ctx.lineTo(padding + (this.data.length - 1) * xStep, height - padding);
+                ctx.closePath();
+                ctx.fillStyle = this.options.fillColor;
+                ctx.fill();
+                
+                // Draw line
+                ctx.beginPath();
+                this.data.forEach((d, i) => {
+                    const x = padding + i * xStep;
+                    const y = height - padding - ((d - min) / range) * (height - padding * 2);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.strokeStyle = this.options.lineColor;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw latest value
+                const latest = this.data[this.data.length - 1];
+                ctx.fillStyle = '#212529';
+                ctx.font = '11px -apple-system, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(latest.toFixed(4), width - padding, 20);
+            }
+        }
+        
+        // Initialize charts
+        const lossChart = new SimpleChart(document.getElementById('lossChart'));
+        const accChart = new SimpleChart(document.getElementById('accChart'), {
+            lineColor: '#40c057',
+            fillColor: 'rgba(64, 192, 87, 0.1)'
+        });
+        
+        // Format time
+        function formatTime(seconds) {
+            if (!seconds || seconds < 0) return '--';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}h ${m}m`;
+            if (m > 0) return `${m}m ${s}s`;
+            return `${s}s`;
+        }
+        
+        // Log entries
+        const logEntries = document.getElementById('logEntries');
+        function addLog(message) {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">${time}</span>${message}`;
+            logEntries.insertBefore(entry, logEntries.firstChild);
+            
+            // Keep only last 50 entries
+            while (logEntries.children.length > 50) {
+                logEntries.removeChild(logEntries.lastChild);
+            }
+        }
+        
+        // Update UI with metrics
+        function updateUI(metrics) {
+            // Status
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            statusDot.className = 'status-dot ' + metrics.status;
+            statusText.textContent = metrics.status.charAt(0).toUpperCase() + metrics.status.slice(1);
+            
+            // Progress
+            document.getElementById('currentEpoch').textContent = metrics.epoch;
+            document.getElementById('totalEpochs').textContent = metrics.total_epochs;
+            const progress = (metrics.epoch / metrics.total_epochs) * 100;
+            document.getElementById('progressFill').style.width = progress + '%';
+            document.getElementById('etaText').textContent = 'ETA: ' + formatTime(metrics.eta_seconds);
+            
+            // Main metrics
+            document.getElementById('lossValue').textContent = metrics.loss ? metrics.loss.toFixed(4) : '--';
+            document.getElementById('accValue').textContent = metrics.val_accuracy ? (metrics.val_accuracy * 100).toFixed(1) + '%' : '--';
+            document.getElementById('throughputValue').textContent = metrics.samples_per_sec ? metrics.samples_per_sec.toFixed(0) : '--';
+            document.getElementById('memoryValue').textContent = metrics.memory_gb ? metrics.memory_gb.toFixed(1) : '--';
+            
+            // Secondary metrics
+            document.getElementById('lrValue').textContent = metrics.lr ? metrics.lr.toExponential(1) : '--';
+            document.getElementById('recValue').textContent = metrics.n_recursions || '--';
+            document.getElementById('entropyValue').textContent = metrics.attn_entropy ? metrics.attn_entropy.toFixed(2) : '--';
+            document.getElementById('elapsedValue').textContent = formatTime(metrics.elapsed_seconds);
+            
+            // Charts
+            if (metrics.history) {
+                lossChart.update(metrics.history.train_loss);
+                accChart.update(metrics.history.val_accuracy.filter(v => v !== null));
+            }
+        }
+        
+        // Connect to SSE stream
+        function connect() {
+            const eventSource = new EventSource('/api/stream');
+            
+            eventSource.onopen = () => {
+                addLog('Connected to training server');
+            };
+            
+            eventSource.onmessage = (event) => {
+                try {
+                    const metrics = JSON.parse(event.data);
+                    updateUI(metrics);
+                } catch (e) {
+                    console.error('Failed to parse metrics:', e);
+                }
+            };
+            
+            eventSource.onerror = () => {
+                document.getElementById('statusDot').className = 'status-dot error';
+                document.getElementById('statusText').textContent = 'Disconnected';
+                addLog('Connection lost, reconnecting...');
+                eventSource.close();
+                setTimeout(connect, 2000);
+            };
+        }
+        
+        // Start connection
+        connect();
+        addLog('Dashboard initialized');
+    </script>
+</body>
+</html>

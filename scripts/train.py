@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.train import TrainConfig, Trainer
 
 
-def load_config(config_path: str) -> TrainConfig:
+def load_config(config_path: str, dashboard: bool = False, dashboard_port: int = 3000) -> TrainConfig:
     """Load config from YAML file."""
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
@@ -69,6 +69,10 @@ def load_config(config_path: str) -> TrainConfig:
         wandb_project=cfg.get("logging", {}).get("wandb_project", "trm-arc"),
         wandb_run_name=cfg.get("logging", {}).get("wandb_run_name"),
         
+        # Dashboard
+        use_dashboard=dashboard or cfg.get("dashboard", {}).get("enabled", False),
+        dashboard_port=dashboard_port or cfg.get("dashboard", {}).get("port", 3000),
+        
         # Hardware
         device=device,
         use_amp=cfg.get("hardware", {}).get("use_amp", True)
@@ -78,10 +82,12 @@ def load_config(config_path: str) -> TrainConfig:
 def main():
     parser = argparse.ArgumentParser(description="Train TRM on ARC-AGI")
     parser.add_argument("--config", type=str, required=True, help="Path to config YAML")
+    parser.add_argument("--dashboard", action="store_true", help="Enable live dashboard on port 3000")
+    parser.add_argument("--dashboard-port", type=int, default=3000, help="Dashboard port")
     args = parser.parse_args()
     
     print(f"Loading config from {args.config}")
-    config = load_config(args.config)
+    config = load_config(args.config, dashboard=args.dashboard, dashboard_port=args.dashboard_port)
     
     print(f"\nConfiguration:")
     for key, value in vars(config).items():
