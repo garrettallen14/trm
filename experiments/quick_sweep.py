@@ -50,13 +50,13 @@ class SweepConfig:
     n_heads: int = 4
     n_layers: int = 2
     n_recursions: int = 8  # Full recursions
-    batch_size: int = 8  # Conservative for variable demo counts (up to 10)
-    grad_accum: int = 4  # Effective batch = 8 * 4 = 32
+    batch_size: int = 1  # No batching = no padding = no OOM
+    grad_accum: int = 16  # Effective batch = 1 * 16 = 16
     lr_trunk: float = 1e-4
     lr_embed: float = 1e-2
     supervision_weights: str = "uniform"
-    augment_factor: int = 10
-    epochs: int = 5
+    augment_factor: int = 2  # Less augmentation for faster sweeps
+    epochs: int = 2  # Just enough to see trends
 
 
 def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> dict:
