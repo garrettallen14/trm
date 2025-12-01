@@ -361,15 +361,25 @@ def collate_fn(batch: list[dict]) -> dict:
         task_ids.append(item["task_id"])
     
     # Stack into tensors
-    # demo_inputs: [batch, n_demos, h, w]
-    n_demos = len(batch_demo_inputs[0])
+    # Handle variable number of demos per task by finding max and padding
+    max_demos = max(len(demos) for demos in batch_demo_inputs)
+    
+    # Pad tasks with fewer demos using padding token grids
+    pad_grid = torch.full((max_h, max_w), tokenizer.pad_token, dtype=torch.long)
+    
+    for b in range(len(batch)):
+        while len(batch_demo_inputs[b]) < max_demos:
+            batch_demo_inputs[b].append(pad_grid.clone())
+            batch_demo_outputs[b].append(pad_grid.clone())
+    
+    # Now stack - demo_inputs: list of [batch, h, w] for each demo
     demo_inputs = [
         torch.stack([batch_demo_inputs[b][d] for b in range(len(batch))])
-        for d in range(n_demos)
+        for d in range(max_demos)
     ]
     demo_outputs = [
         torch.stack([batch_demo_outputs[b][d] for b in range(len(batch))])
-        for d in range(n_demos)
+        for d in range(max_demos)
     ]
     
     return {
@@ -377,7 +387,8 @@ def collate_fn(batch: list[dict]) -> dict:
         "demo_outputs": demo_outputs,
         "test_input": torch.stack(batch_test_inputs),
         "test_output": torch.stack(batch_test_outputs),
-        "task_ids": task_ids
+        "task_ids": task_ids,
+        "n_demos": [len(item["demo_inputs"]) for item in batch]  # Track actual demo counts
     }
 
 

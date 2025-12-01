@@ -376,11 +376,28 @@ class TinyRecursiveModel(nn.Module):
         batch = test_input.shape[0]
         test_h, test_w = test_input.shape[1], test_input.shape[2]
         
+        # Input validation
+        assert len(demo_inputs) == len(demo_outputs), \
+            f"Mismatch: {len(demo_inputs)} demo inputs vs {len(demo_outputs)} demo outputs"
+        assert len(demo_inputs) > 0, "Need at least one demo pair"
+        
+        # Filter out padding demos (all pad tokens)
+        pad_token = 10  # PAD token value
+        valid_demos = []
+        for inp, out in zip(demo_inputs, demo_outputs):
+            # Check if this demo is all padding
+            if not (inp == pad_token).all():
+                valid_demos.append((inp, out))
+        
+        if len(valid_demos) == 0:
+            # Fallback: use first demo even if padded
+            valid_demos = [(demo_inputs[0], demo_outputs[0])]
+        
         # Encode all demos
         all_embeddings = []
         all_positions = []
         
-        for inp, out in zip(demo_inputs, demo_outputs):
+        for inp, out in valid_demos:
             inp_emb, inp_pos = self.encode_grid(inp, is_output=False)
             out_emb, out_pos = self.encode_grid(out, is_output=True)
             
