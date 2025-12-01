@@ -55,8 +55,8 @@ class SweepConfig:
     lr_trunk: float = 1e-4
     lr_embed: float = 1e-2
     supervision_weights: str = "uniform"
-    augment_factor: int = 2  # Less augmentation for faster sweeps
-    epochs: int = 2  # Just enough to see trends
+    augment_factor: int = 1  # Minimal augmentation for fastest sweeps
+    epochs: int = 1  # Just enough to see if loss decreases
 
 
 def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> dict:
