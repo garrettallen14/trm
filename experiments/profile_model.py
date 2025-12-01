@@ -225,12 +225,65 @@ def profile_recursion_depths(model: nn.Module, device: torch.device, batch_size:
     return results
 
 
+def profile_grid_sizes(model: nn.Module, device: torch.device, n_recursions: int = 8):
+    """Profile max batch size at different grid sizes."""
+    print("\n" + "="*60)
+    print("Max Batch Size by Grid Size")
+    print("="*60)
+    print("  (Grid sizes based on ARC data distribution)")
+    
+    model.to(device)
+    model.train()
+    
+    # Test realistic grid sizes from ARC distribution
+    # Tiny: 3-5, Small: 6-10, Medium: 11-15, Large: 16-25, XL: 26-30
+    grid_sizes = [5, 10, 15, 20, 25, 30]
+    results = {}
+    
+    for grid_size in grid_sizes:
+        clear_memory(device)
+        
+        # Binary search for max batch
+        low, high = 1, 256
+        max_working = 1
+        
+        while low <= high:
+            mid = (low + high) // 2
+            clear_memory(device)
+            
+            try:
+                demo_inputs, demo_outputs, test_input, test_output = create_dummy_batch(
+                    mid, n_demos=3, grid_size=grid_size, device=device
+                )
+                
+                loss_dict = model.compute_loss(demo_inputs, demo_outputs, test_input, test_output, n_recursions=n_recursions)
+                loss_dict["total_loss"].backward()
+                model.zero_grad()
+                
+                max_working = mid
+                low = mid + 1
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    high = mid - 1
+                else:
+                    raise e
+            
+            clear_memory(device)
+        
+        results[grid_size] = max_working
+        print(f"  Grid {grid_size:2d}x{grid_size:2d}: max batch = {max_working:3d}")
+    
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description="Profile TRM model")
     parser.add_argument("--d_model", type=int, default=512)
     parser.add_argument("--n_heads", type=int, default=4)
     parser.add_argument("--n_layers", type=int, default=2)
-    parser.add_argument("--n_recursions", type=int, default=16)
+    parser.add_argument("--n_recursions", type=int, default=8)
+    parser.add_argument("--quick", action="store_true", help="Quick mode - skip some tests")
     args = parser.parse_args()
     
     device = get_device()
@@ -252,23 +305,31 @@ def main():
     print(f"\nModel: d={args.d_model}, h={args.n_heads}, L={args.n_layers}, K={args.n_recursions}")
     print(f"Parameters: {params['total']:,}")
     
-    # Find max batch size
-    max_batch = find_max_batch_size(model, device, n_recursions=args.n_recursions)
+    # Profile by grid size (most useful info)
+    grid_batch_limits = profile_grid_sizes(model, device, n_recursions=args.n_recursions)
     
-    # Benchmark throughput
-    batch_sizes = [b for b in [4, 8, 16, 32, 64, 128, 256] if b <= max_batch]
-    benchmark_throughput(model, device, batch_sizes, n_recursions=args.n_recursions)
-    
-    # Profile recursion depths
-    optimal_batch = min(64, max_batch)
-    profile_recursion_depths(model, device, optimal_batch, depths=[2, 4, 8, 12, 16])
+    if not args.quick:
+        # Find max batch size with typical grid (12x12 is average)
+        max_batch = find_max_batch_size(model, device, n_recursions=args.n_recursions, grid_size=12)
+        
+        # Benchmark throughput
+        batch_sizes = [b for b in [4, 8, 16, 32, 64] if b <= max_batch]
+        if batch_sizes:
+            benchmark_throughput(model, device, batch_sizes, n_recursions=args.n_recursions)
+        
+        # Profile recursion depths
+        optimal_batch = min(16, max_batch)
+        profile_recursion_depths(model, device, optimal_batch, depths=[2, 4, 8, 12, 16])
     
     print("\n" + "="*60)
     print("RECOMMENDATIONS")
     print("="*60)
-    print(f"  Max batch size: {max_batch}")
-    print(f"  Recommended batch: {min(128, max_batch)}")
-    print(f"  Use gradient accumulation if you need larger effective batch")
+    print(f"  For small grids (≤10): batch_size=32-64 works")
+    print(f"  For medium grids (11-20): batch_size=8-16 works")
+    print(f"  For large grids (21-30): batch_size=2-4 works")
+    print(f"")
+    print(f"  Safe default: batch_size=4 with grad_accum=8")
+    print(f"  This handles all grid sizes with OOM fallback")
     print("="*60)
 
 

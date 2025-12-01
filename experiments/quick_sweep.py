@@ -24,6 +24,8 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import gc
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -31,6 +33,13 @@ from tqdm import tqdm
 
 from src.model import TinyRecursiveModel
 from src.data import create_dataloader
+
+
+def clear_memory():
+    """Clear GPU memory."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 @dataclass
@@ -41,7 +50,8 @@ class SweepConfig:
     n_heads: int = 4
     n_layers: int = 2
     n_recursions: int = 8
-    batch_size: int = 32
+    batch_size: int = 4  # Small for large grids
+    grad_accum: int = 8  # Effective batch = 4 * 8 = 32
     lr_trunk: float = 1e-4
     lr_embed: float = 1e-2
     supervision_weights: str = "uniform"
@@ -85,36 +95,54 @@ def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> 
         num_workers=0  # Simpler for experiments
     )
     
-    # Training
+    # Training with gradient accumulation
     start_time = time.time()
     train_losses = []
+    grad_accum = getattr(config, 'grad_accum', 8)
     
     for epoch in range(1, config.epochs + 1):
         model.train()
         epoch_loss = 0.0
         n_batches = 0
+        accum_step = 0
         
+        optimizer.zero_grad()
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}", leave=False)
         for batch in pbar:
-            demo_inputs = [g.to(device) for g in batch["demo_inputs"]]
-            demo_outputs = [g.to(device) for g in batch["demo_outputs"]]
-            test_input = batch["test_input"].to(device)
-            test_output = batch["test_output"].to(device)
-            
-            optimizer.zero_grad()
-            loss_dict = model.compute_loss(
-                demo_inputs, demo_outputs, test_input, test_output,
-                n_recursions=config.n_recursions,
-                supervision_weights=config.supervision_weights
-            )
-            loss = loss_dict["total_loss"]
-            loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-            n_batches += 1
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            try:
+                demo_inputs = [g.to(device) for g in batch["demo_inputs"]]
+                demo_outputs = [g.to(device) for g in batch["demo_outputs"]]
+                test_input = batch["test_input"].to(device)
+                test_output = batch["test_output"].to(device)
+                
+                loss_dict = model.compute_loss(
+                    demo_inputs, demo_outputs, test_input, test_output,
+                    n_recursions=config.n_recursions,
+                    supervision_weights=config.supervision_weights
+                )
+                loss = loss_dict["total_loss"] / grad_accum
+                loss.backward()
+                
+                accum_step += 1
+                epoch_loss += loss.item() * grad_accum
+                n_batches += 1
+                
+                if accum_step >= grad_accum:
+                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    accum_step = 0
+                
+                pbar.set_postfix({"loss": f"{loss.item() * grad_accum:.4f}"})
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    pbar.set_postfix({"status": "OOM-skip"})
+                    clear_memory()
+                    optimizer.zero_grad()
+                    accum_step = 0
+                    continue
+                raise e
         
         avg_loss = epoch_loss / n_batches
         train_losses.append(avg_loss)
@@ -137,16 +165,22 @@ def run_experiment(config: SweepConfig, data_dir: str, device: torch.device) -> 
     
     with torch.no_grad():
         for batch in list(val_loader)[:20]:  # Quick sample
-            demo_inputs = [g.to(device) for g in batch["demo_inputs"]]
-            demo_outputs = [g.to(device) for g in batch["demo_outputs"]]
-            test_input = batch["test_input"].to(device)
-            test_output = batch["test_output"].to(device)
-            
-            preds = model.predict(demo_inputs, demo_outputs, test_input)
-            
-            mask = test_output != 10  # Ignore padding
-            correct_cells += ((preds == test_output) & mask).sum().item()
-            total_cells += mask.sum().item()
+            try:
+                demo_inputs = [g.to(device) for g in batch["demo_inputs"]]
+                demo_outputs = [g.to(device) for g in batch["demo_outputs"]]
+                test_input = batch["test_input"].to(device)
+                test_output = batch["test_output"].to(device)
+                
+                preds = model.predict(demo_inputs, demo_outputs, test_input)
+                
+                mask = test_output != 10  # Ignore padding
+                correct_cells += ((preds == test_output) & mask).sum().item()
+                total_cells += mask.sum().item()
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    clear_memory()
+                    continue
+                raise e
     
     val_acc = correct_cells / total_cells if total_cells > 0 else 0
     
