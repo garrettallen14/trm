@@ -1,3 +1,27 @@
+# TRM Training Configuration
+
+## Full Training Run (Based on Research)
+
+```bash
+# The real deal - full TRM training
+uv run python experiments/train_full.py --amp --dashboard
+
+# Expected: ~12-24 hours, 35-45% task accuracy on AGI-1
+```
+
+### Key Settings from TRM Paper
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| **n_recursions** | 16 | Paper uses 16, not 8 |
+| **augment_factor** | 100 | 8 dihedrals × 12 color perms |
+| **no_grad_loops** | 6 | Free test-time simulation |
+| **lr_embed** | 1e-2 | 100× higher than trunk |
+| **epochs** | 100 | Full training |
+| **supervision** | uniform | Deep supervision at all steps |
+
+---
+
 # Sweep Results Analysis
 
 ## What We Learned
