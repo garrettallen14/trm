@@ -110,6 +110,21 @@ def train(args):
     if device.type == "cuda":
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        
+        # === GPU OPTIMIZATIONS ===
+        # TF32: 3x faster matmuls on Ampere (A40, A100, etc.) with ~0.1% precision loss
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        
+        # cuDNN autotuning: finds fastest algorithms for your hardware
+        torch.backends.cudnn.benchmark = True
+        
+        # Disable debug features for speed
+        torch.autograd.set_detect_anomaly(False)
+        torch.autograd.profiler.profile(False)
+        torch.autograd.profiler.emit_nvtx(False)
+        
+        print("GPU optimizations: TF32 + cuDNN benchmark enabled")
     
     # Dashboard
     dashboard = None
@@ -172,8 +187,10 @@ def train(args):
     
     # Compile model for faster training (PyTorch 2.0+)
     if args.compile:
-        print("Compiling model with torch.compile...")
-        model = torch.compile(model)
+        print("Compiling model with torch.compile (max-autotune)...")
+        # max-autotune: slower compile, faster runtime
+        # reduce-overhead: reduces Python overhead
+        model = torch.compile(model, mode="max-autotune")
         print("Model compiled!")
     
     # Optimizer with differential LR (critical for TRM!)
@@ -183,10 +200,11 @@ def train(args):
     print(f"Trunk params: {sum(p.numel() for p in trunk_params):,}")
     print(f"Embed params: {sum(p.numel() for p in embed_params):,}")
     
+    # Fused AdamW: fuses optimizer step into single kernel (10-15% faster)
     optimizer = optim.AdamW([
         {"params": trunk_params, "lr": config["lr_trunk"]},
         {"params": embed_params, "lr": config["lr_embed"]}
-    ], weight_decay=config["weight_decay"])
+    ], weight_decay=config["weight_decay"], fused=True)
     
     # Warmup + Cosine decay (TRM paper: 10% warmup)
     warmup_epochs = config["warmup_epochs"]
@@ -248,15 +266,16 @@ def train(args):
         accum_step = 0
         oom_count = 0
         
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)  # Faster than setting to zero
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{config['epochs']}")
         
         for batch in pbar:
             try:
-                demo_inputs = [g.to(device) for g in batch["demo_inputs"]]
-                demo_outputs = [g.to(device) for g in batch["demo_outputs"]]
-                test_input = batch["test_input"].to(device)
-                test_output = batch["test_output"].to(device)
+                # Non-blocking transfers: overlap CPU->GPU with compute
+                demo_inputs = [g.to(device, non_blocking=True) for g in batch["demo_inputs"]]
+                demo_outputs = [g.to(device, non_blocking=True) for g in batch["demo_outputs"]]
+                test_input = batch["test_input"].to(device, non_blocking=True)
+                test_output = batch["test_output"].to(device, non_blocking=True)
                 
                 # === NO-GRAD REFINEMENT LOOPS (TRM trick) ===
                 # Run 6 iterations without gradients to simulate test-time
@@ -293,7 +312,7 @@ def train(args):
                     else:
                         nn.utils.clip_grad_norm_(model.parameters(), config["clip_grad"])
                         optimizer.step()
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)  # Faster than setting to zero
                     accum_step = 0
                 
                 pbar.set_postfix({
@@ -324,7 +343,7 @@ def train(args):
                 if "out of memory" in str(e).lower():
                     oom_count += 1
                     clear_memory()
-                    optimizer.zero_grad()
+                    optimizer.zero_grad(set_to_none=True)  # Faster than setting to zero
                     accum_step = 0
                     continue
                 raise e
