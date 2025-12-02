@@ -31,6 +31,7 @@ class MetricsStore:
         self._lock = threading.Lock()
         self._metrics = {
             "status": "waiting",
+            "model_type": "trm",  # "trm" or "diffusion"
             "epoch": 0,
             "total_epochs": 100,
             "step": 0,
@@ -39,6 +40,8 @@ class MetricsStore:
             "final_loss": 0.0,
             "val_loss": None,
             "val_accuracy": None,
+            "cell_accuracy": 0.0,  # NEW: per-cell accuracy
+            "task_accuracy": 0.0,  # NEW: whole-task accuracy
             "attn_entropy": 0.0,
             "lr": 0.0,
             "samples_per_sec": 0.0,
@@ -51,6 +54,8 @@ class MetricsStore:
                 "train_loss": [],
                 "val_loss": [],
                 "val_accuracy": [],
+                "cell_accuracy": [],  # NEW
+                "task_accuracy": [],  # NEW
             }
         }
         self._subscribers = []
@@ -69,12 +74,22 @@ class MetricsStore:
         with self._lock:
             return self._metrics.copy()
     
-    def add_epoch_to_history(self, epoch: int, train_loss: float, val_loss: Optional[float], val_accuracy: Optional[float]):
+    def add_epoch_to_history(
+        self, 
+        epoch: int, 
+        train_loss: float, 
+        val_loss: Optional[float] = None, 
+        val_accuracy: Optional[float] = None,
+        cell_accuracy: Optional[float] = None,
+        task_accuracy: Optional[float] = None
+    ):
         with self._lock:
             self._metrics["history"]["epochs"].append(epoch)
             self._metrics["history"]["train_loss"].append(train_loss)
             self._metrics["history"]["val_loss"].append(val_loss)
             self._metrics["history"]["val_accuracy"].append(val_accuracy)
+            self._metrics["history"]["cell_accuracy"].append(cell_accuracy)
+            self._metrics["history"]["task_accuracy"].append(task_accuracy)
     
     def subscribe(self):
         queue = asyncio.Queue()

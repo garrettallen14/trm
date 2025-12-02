@@ -223,7 +223,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>TRM Training</h1>
+            <h1><span id="modelType">TRM</span> Training</h1>
             <div class="status">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">Connecting...</span>
@@ -247,14 +247,14 @@
                 <div class="card-sub">Training loss</div>
             </div>
             <div class="card">
-                <div class="card-label">Accuracy</div>
-                <div class="card-value" id="accValue">--</div>
-                <div class="card-sub">Validation</div>
+                <div class="card-label">Cell Accuracy</div>
+                <div class="card-value" id="cellAccValue" style="color: #228be6;">--</div>
+                <div class="card-sub">Per-cell correct</div>
             </div>
             <div class="card">
-                <div class="card-label">Throughput</div>
-                <div class="card-value small" id="throughputValue">--</div>
-                <div class="card-sub">samples/sec</div>
+                <div class="card-label">Task Accuracy</div>
+                <div class="card-value" id="taskAccValue" style="color: #40c057;">--</div>
+                <div class="card-sub">Full grids correct</div>
             </div>
             <div class="card">
                 <div class="card-label">Memory</div>
@@ -269,12 +269,13 @@
                 <div class="card-value small" id="lrValue">--</div>
             </div>
             <div class="card">
-                <div class="card-label">Recursion Depth</div>
+                <div class="card-label">Steps/Timesteps</div>
                 <div class="card-value small" id="recValue">--</div>
             </div>
             <div class="card">
-                <div class="card-label">Attention Entropy</div>
-                <div class="card-value small" id="entropyValue">--</div>
+                <div class="card-label">Throughput</div>
+                <div class="card-value small" id="throughputValue">--</div>
+                <div class="card-sub">samples/sec</div>
             </div>
             <div class="card">
                 <div class="card-label">Elapsed</div>
@@ -290,9 +291,10 @@
                 </div>
             </div>
             <div class="chart-card">
-                <div class="chart-title">Validation Accuracy</div>
+                <div class="chart-title">Cell Accuracy (blue) / Task Accuracy (green)</div>
                 <div class="chart-container">
-                    <canvas id="accChart"></canvas>
+                    <canvas id="cellAccChart"></canvas>
+                    <canvas id="taskAccChart" style="position: absolute; top: 0; left: 0;"></canvas>
                 </div>
             </div>
         </div>
@@ -397,9 +399,13 @@
         
         // Initialize charts
         const lossChart = new SimpleChart(document.getElementById('lossChart'));
-        const accChart = new SimpleChart(document.getElementById('accChart'), {
+        const cellAccChart = new SimpleChart(document.getElementById('cellAccChart'), {
+            lineColor: '#228be6',
+            fillColor: 'rgba(34, 139, 230, 0.1)'
+        });
+        const taskAccChart = new SimpleChart(document.getElementById('taskAccChart'), {
             lineColor: '#40c057',
-            fillColor: 'rgba(64, 192, 87, 0.1)'
+            fillColor: 'rgba(64, 192, 87, 0.05)'
         });
         
         // Format time
@@ -443,22 +449,27 @@
             document.getElementById('progressFill').style.width = progress + '%';
             document.getElementById('etaText').textContent = 'ETA: ' + formatTime(metrics.eta_seconds);
             
+            // Model type
+            const modelType = metrics.model_type || 'TRM';
+            document.getElementById('modelType').textContent = modelType.toUpperCase();
+            
             // Main metrics
             document.getElementById('lossValue').textContent = metrics.loss ? metrics.loss.toFixed(4) : '--';
-            document.getElementById('accValue').textContent = metrics.val_accuracy ? (metrics.val_accuracy * 100).toFixed(1) + '%' : '--';
-            document.getElementById('throughputValue').textContent = metrics.samples_per_sec ? metrics.samples_per_sec.toFixed(0) : '--';
+            document.getElementById('cellAccValue').textContent = metrics.cell_accuracy ? (metrics.cell_accuracy * 100).toFixed(1) + '%' : '--';
+            document.getElementById('taskAccValue').textContent = metrics.task_accuracy ? (metrics.task_accuracy * 100).toFixed(1) + '%' : '0.0%';
             document.getElementById('memoryValue').textContent = metrics.memory_gb ? metrics.memory_gb.toFixed(1) : '--';
             
             // Secondary metrics
             document.getElementById('lrValue').textContent = metrics.lr ? metrics.lr.toExponential(1) : '--';
             document.getElementById('recValue').textContent = metrics.n_recursions || '--';
-            document.getElementById('entropyValue').textContent = metrics.attn_entropy ? metrics.attn_entropy.toFixed(2) : '--';
+            document.getElementById('throughputValue').textContent = metrics.samples_per_sec ? metrics.samples_per_sec.toFixed(0) : '--';
             document.getElementById('elapsedValue').textContent = formatTime(metrics.elapsed_seconds);
             
             // Charts
             if (metrics.history) {
                 lossChart.update(metrics.history.train_loss);
-                accChart.update(metrics.history.val_accuracy.filter(v => v !== null));
+                cellAccChart.update(metrics.history.cell_accuracy.filter(v => v !== null && v !== undefined));
+                taskAccChart.update(metrics.history.task_accuracy.filter(v => v !== null && v !== undefined));
             }
         }
         
