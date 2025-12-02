@@ -187,10 +187,10 @@ def train(args):
     
     # Compile model for faster training (PyTorch 2.0+)
     if args.compile:
-        print("Compiling model with torch.compile (max-autotune)...")
-        # max-autotune: slower compile, faster runtime
-        # reduce-overhead: reduces Python overhead
-        model = torch.compile(model, mode="max-autotune")
+        print("Compiling model with torch.compile...")
+        # max-autotune can crash with dynamic shapes due to CUDA graph issues
+        # Use default mode which is more stable
+        model = torch.compile(model)
         print("Model compiled!")
     
     # Optimizer with differential LR (critical for TRM!)
