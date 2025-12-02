@@ -848,11 +848,12 @@ def train(args):
         agi2_results = None
         if epoch % 5 == 0 or epoch == config.epochs:
             agi2_path = Path("data/arc-agi-2")
-            if agi2_path.exists():
+            # AGI-2 has structure: data/arc-agi-2/data/evaluation/
+            if agi2_path.exists() and (agi2_path / "data" / "evaluation").exists():
                 print("  Evaluating on ARC-AGI-2...")
                 try:
                     agi2_results = evaluate(
-                        model, str(agi2_path), "challenges", device,
+                        model, str(agi2_path), "evaluation", device,
                         n_samples=100, num_steps=config.num_timesteps
                     )
                     print(f"  AGI-2: task_acc={agi2_results['task_accuracy']:.1%}, "
