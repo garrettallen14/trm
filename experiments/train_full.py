@@ -160,8 +160,12 @@ def train(args):
         d_model=config["d_model"],
         n_heads=config["n_heads"],
         n_layers=config["n_layers"],
-        n_recursions=config["n_recursions"]
+        n_recursions=config["n_recursions"],
+        gradient_checkpointing=args.grad_checkpoint
     ).to(device)
+    
+    if args.grad_checkpoint:
+        print("Using gradient checkpointing (saves ~50% memory, 20% slower)")
     
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nParameters: {n_params:,}")
@@ -444,13 +448,14 @@ def main():
     parser = argparse.ArgumentParser(description="Full TRM training run")
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=6)  # Higher = better GPU util
-    parser.add_argument("--grad_accum", type=int, default=5)  # Effective batch = 30
+    parser.add_argument("--batch_size", type=int, default=8)  # Higher with grad checkpointing
+    parser.add_argument("--grad_accum", type=int, default=4)  # Effective batch = 32
     parser.add_argument("--augment_factor", type=int, default=20)  # 20× for fast iteration
     parser.add_argument("--n_recursions", type=int, default=8)  # 8 was best in sweep
     parser.add_argument("--no_grad_loops", type=int, default=0)  # Skip for speed
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
     parser.add_argument("--compile", action="store_true", help="Use torch.compile for speed")
+    parser.add_argument("--grad_checkpoint", action="store_true", help="Use gradient checkpointing to save memory")
     parser.add_argument("--dashboard", action="store_true", help="Send metrics to dashboard")
     args = parser.parse_args()
     

@@ -12,6 +12,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 from einops import rearrange, repeat
 
 
@@ -279,13 +280,15 @@ class TinyRecursiveModel(nn.Module):
         n_layers: int = 2,
         n_recursions: int = 16,
         max_grid_size: int = 32,
-        dropout: float = 0.0
+        dropout: float = 0.0,
+        gradient_checkpointing: bool = False
     ):
         super().__init__()
         self.n_colors = n_colors
         self.d_model = d_model
         self.n_recursions = n_recursions
         self.max_grid_size = max_grid_size
+        self.gradient_checkpointing = gradient_checkpointing
         
         # Input embeddings
         self.cell_embed = nn.Embedding(n_colors, d_model)
@@ -440,8 +443,16 @@ class TinyRecursiveModel(nn.Module):
         intermediates = []
         
         for step in range(n_recursions):
-            # Pass through transformer
-            x, attn_probs_list = self.transformer(x, positions)
+            # Pass through transformer (with optional gradient checkpointing)
+            if self.gradient_checkpointing and self.training:
+                # Checkpoint saves memory by recomputing activations during backward
+                x, attn_probs_list = checkpoint(
+                    self.transformer,
+                    x, positions, None,
+                    use_reentrant=False
+                )
+            else:
+                x, attn_probs_list = self.transformer(x, positions)
             
             # Note: Flash Attention doesn't return attn_probs (that's how it saves memory)
             # Entropy tracking is disabled when using Flash Attention
