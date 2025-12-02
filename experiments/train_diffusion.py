@@ -44,6 +44,7 @@ from src.evaluation import ARCEvaluator, create_evaluator
 # Optional dashboard
 try:
     from dashboard.client import DashboardClient
+    from dashboard.server import run_server_background
     DASHBOARD_AVAILABLE = True
 except ImportError:
     DASHBOARD_AVAILABLE = False
@@ -644,12 +645,15 @@ def train(args):
         self_conditioning=args.self_cond
     )
     
-    # === Dashboard ===
+    # === Dashboard (runs in-process for reliability) ===
     dashboard = None
     if args.dashboard and DASHBOARD_AVAILABLE:
         try:
-            dashboard = DashboardClient(mode="http", url="http://localhost:3000")
-            print("Dashboard: connected")
+            # Start dashboard server in background thread
+            run_server_background(host="0.0.0.0", port=3000)
+            # Use inprocess mode for direct communication (no HTTP)
+            dashboard = DashboardClient(mode="inprocess")
+            print("Dashboard: http://localhost:3000 (in-process)")
         except Exception as e:
             print(f"Dashboard: failed ({e})")
     
