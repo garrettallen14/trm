@@ -64,6 +64,7 @@ class DiffusionConfig:
     n_layers: int = 2
     n_colors: int = 11  # 0-9 + padding
     max_grid_size: int = 32
+    max_demos: int = 2  # Limit demo pairs for speed
     
     # Diffusion
     num_timesteps: int = 16  # Same as TRM recursion depth
@@ -335,6 +336,11 @@ class DiscreteDiffusionTRM(nn.Module):
         # === Encode all grids ===
         all_emb = []
         all_pos = []
+        
+        # Limit demo pairs for speed (attention is O(n²))
+        max_demos = self.config.max_demos
+        demo_inputs = demo_inputs[:max_demos]
+        demo_outputs = demo_outputs[:max_demos]
         
         for inp, out in zip(demo_inputs, demo_outputs):
             inp_emb, inp_pos = self.encode_grid(inp, 'demo_in')
@@ -634,6 +640,7 @@ def train(args):
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         num_timesteps=args.num_timesteps,
+        max_demos=args.max_demos,
         lr=args.lr,
         epochs=args.epochs,
         batch_size=args.batch_size,
@@ -1005,6 +1012,7 @@ def main():
     parser.add_argument("--n_heads", type=int, default=4)
     parser.add_argument("--n_layers", type=int, default=2)
     parser.add_argument("--num_timesteps", type=int, default=16, help="Diffusion timesteps")
+    parser.add_argument("--max_demos", type=int, default=2, help="Max demo pairs (less=faster)")
     parser.add_argument("--self_cond", action="store_true", help="Use self-conditioning")
     
     # Training
