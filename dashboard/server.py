@@ -90,6 +90,12 @@ class MetricsStore:
             self._metrics["history"]["val_accuracy"].append(val_accuracy)
             self._metrics["history"]["cell_accuracy"].append(cell_accuracy)
             self._metrics["history"]["task_accuracy"].append(task_accuracy)
+            # Notify subscribers so charts update!
+            for queue in self._subscribers:
+                try:
+                    queue.put_nowait(self._metrics.copy())
+                except:
+                    pass
     
     def subscribe(self):
         queue = asyncio.Queue()

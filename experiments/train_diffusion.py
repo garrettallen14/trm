@@ -838,11 +838,27 @@ def train(args):
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         
-        # === Evaluation (quick subset during training) ===
+        # === Evaluation on ARC-AGI-1 (every epoch) ===
         eval_results = evaluate(
             model, args.data_dir, "evaluation", device,
-            n_samples=100, num_steps=config.num_timesteps  # 100 tasks for quick eval
+            n_samples=100, num_steps=config.num_timesteps
         )
+        
+        # === Evaluation on ARC-AGI-2 (every 5th epoch) ===
+        agi2_results = None
+        if epoch % 5 == 0 or epoch == config.epochs:
+            agi2_path = Path("data/arc-agi-2")
+            if agi2_path.exists():
+                print("  Evaluating on ARC-AGI-2...")
+                try:
+                    agi2_results = evaluate(
+                        model, str(agi2_path), "challenges", device,
+                        n_samples=100, num_steps=config.num_timesteps
+                    )
+                    print(f"  AGI-2: task_acc={agi2_results['task_accuracy']:.1%}, "
+                          f"cell_acc={agi2_results['cell_accuracy']:.1%}")
+                except Exception as e:
+                    print(f"  AGI-2 eval failed: {e}")
         
         # Log
         history["train_loss"].append(avg_loss)
@@ -850,6 +866,12 @@ def train(args):
         history["task_accuracy"].append(eval_results["task_accuracy"])
         history["lr"].append(current_lr)
         history["epoch_time"].append(epoch_time)
+        if agi2_results:
+            if "agi2_cell_accuracy" not in history:
+                history["agi2_cell_accuracy"] = []
+                history["agi2_task_accuracy"] = []
+            history["agi2_cell_accuracy"].append(agi2_results["cell_accuracy"])
+            history["agi2_task_accuracy"].append(agi2_results["task_accuracy"])
         
         print(f"Epoch {epoch}: loss={avg_loss:.4f}, "
               f"task_acc={eval_results['task_accuracy']:.1%}, "
