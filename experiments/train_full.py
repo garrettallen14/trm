@@ -269,21 +269,38 @@ def train(args):
         optimizer.zero_grad(set_to_none=True)  # Faster than setting to zero
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{config['epochs']}")
         
+        # Timing stats
+        time_data = 0.0
+        time_transfer = 0.0
+        time_nograd = 0.0
+        time_forward = 0.0
+        time_backward = 0.0
+        time_optim = 0.0
+        iter_start = time.time()
+        
         for batch in pbar:
             try:
+                # Data loading time (time since last iteration ended)
+                t0 = time.time()
+                time_data += t0 - iter_start
+                
                 # Non-blocking transfers: overlap CPU->GPU with compute
                 demo_inputs = [g.to(device, non_blocking=True) for g in batch["demo_inputs"]]
                 demo_outputs = [g.to(device, non_blocking=True) for g in batch["demo_outputs"]]
                 test_input = batch["test_input"].to(device, non_blocking=True)
                 test_output = batch["test_output"].to(device, non_blocking=True)
+                torch.cuda.synchronize()  # Wait for transfers to complete (for timing)
+                t1 = time.time()
+                time_transfer += t1 - t0
                 
                 # === NO-GRAD REFINEMENT LOOPS (TRM trick) ===
-                # Run 6 iterations without gradients to simulate test-time
-                # This teaches the model what refinement looks like
                 if config["no_grad_loops"] > 0:
                     with torch.no_grad():
                         _ = model(demo_inputs, demo_outputs, test_input,
                                  n_recursions=config["no_grad_loops"])
+                    torch.cuda.synchronize()
+                t2 = time.time()
+                time_nograd += t2 - t1
                 
                 # === GRADIENT STEP ===
                 with autocast('cuda', enabled=args.amp):
@@ -293,11 +310,17 @@ def train(args):
                         supervision_weights=config["supervision_weights"]
                     )
                     loss = loss_dict["total_loss"] / config["grad_accum"]
+                torch.cuda.synchronize()
+                t3 = time.time()
+                time_forward += t3 - t2
                 
                 if scaler:
                     scaler.scale(loss).backward()
                 else:
                     loss.backward()
+                torch.cuda.synchronize()
+                t4 = time.time()
+                time_backward += t4 - t3
                 
                 accum_step += 1
                 epoch_loss += loss.item() * config["grad_accum"]
@@ -314,6 +337,22 @@ def train(args):
                         optimizer.step()
                     optimizer.zero_grad(set_to_none=True)  # Faster than setting to zero
                     accum_step = 0
+                    torch.cuda.synchronize()
+                    time_optim += time.time() - t4
+                
+                # Print timing breakdown every 50 iterations
+                if n_batches == 50:
+                    total = time_data + time_transfer + time_nograd + time_forward + time_backward + time_optim
+                    print(f"\n⏱️  TIMING BREAKDOWN (first 50 iters):")
+                    print(f"  Data loading:  {time_data:6.2f}s ({100*time_data/total:5.1f}%)")
+                    print(f"  GPU transfer:  {time_transfer:6.2f}s ({100*time_transfer/total:5.1f}%)")
+                    print(f"  No-grad loops: {time_nograd:6.2f}s ({100*time_nograd/total:5.1f}%)")
+                    print(f"  Forward pass:  {time_forward:6.2f}s ({100*time_forward/total:5.1f}%)")
+                    print(f"  Backward pass: {time_backward:6.2f}s ({100*time_backward/total:5.1f}%)")
+                    print(f"  Optimizer:     {time_optim:6.2f}s ({100*time_optim/total:5.1f}%)")
+                    print(f"  TOTAL:         {total:6.2f}s ({total/50:.2f}s/iter)\n")
+                
+                iter_start = time.time()  # Reset for next iteration
                 
                 pbar.set_postfix({
                     "loss": f"{loss.item() * config['grad_accum']:.4f}",
