@@ -39,6 +39,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.data import create_dataloader, Tokenizer
 from src.model import RoPE2D, TransformerBlock, LoopedTransformer
+from src.evaluation import ARCEvaluator, create_evaluator
 
 # Optional dashboard
 try:
@@ -687,9 +688,12 @@ def train(args):
     # === Scheduler: Warmup + Cosine ===
     def lr_lambda(epoch):
         if epoch < config.warmup_epochs:
-            return epoch / config.warmup_epochs
+            return (epoch + 1) / config.warmup_epochs
         else:
-            progress = (epoch - config.warmup_epochs) / (config.epochs - config.warmup_epochs)
+            remaining = config.epochs - config.warmup_epochs
+            if remaining <= 0:
+                return 1.0  # No decay if warmup >= epochs
+            progress = (epoch - config.warmup_epochs) / remaining
             return 0.5 * (1 + math.cos(math.pi * progress))
     
     scheduler = LambdaLR(optimizer, lr_lambda)
@@ -834,10 +838,10 @@ def train(args):
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         
-        # === Evaluation ===
+        # === Evaluation (quick subset during training) ===
         eval_results = evaluate(
             model, args.data_dir, "evaluation", device,
-            n_samples=50, num_steps=config.num_timesteps
+            n_samples=100, num_steps=config.num_timesteps  # 100 tasks for quick eval
         )
         
         # Log
@@ -882,17 +886,42 @@ def train(args):
         with open(save_dir / "history.json", "w") as f:
             json.dump(history, f, indent=2)
     
-    # === Final Evaluation ===
+    # === Final Evaluation (Principled) ===
     print("\n" + "="*60)
-    print("FINAL EVALUATION")
+    print("FINAL EVALUATION (PRINCIPLED)")
     print("="*60)
     
-    # Full eval on AGI-1
-    print("\nEvaluating on ARC-AGI-1 (full)...")
-    agi1_results = evaluate(
-        model, "data/arc-agi-1", "evaluation", device,
-        n_samples=400, num_steps=config.num_timesteps
-    )
+    # Create proper evaluator with contamination check
+    try:
+        evaluator = create_evaluator("data", include_agi2=True)
+        evaluator.verify_no_contamination()  # CRITICAL: verify no train/test overlap
+        
+        # Custom generation function for our model
+        def diffusion_generate(model, demo_inputs, demo_outputs, test_input):
+            result = model.generate(demo_inputs, demo_outputs, test_input, num_steps=config.num_timesteps)
+            return result['prediction']
+        
+        # Full evaluation on all datasets
+        summaries = evaluator.evaluate(
+            model, device, 
+            datasets=None,  # All available
+            max_tasks=None,  # All tasks
+            generate_fn=diffusion_generate
+        )
+        
+        agi1_results = {
+            "task_accuracy": summaries.get("agi1_eval", {}).task_accuracy if "agi1_eval" in summaries else 0,
+            "cell_accuracy": summaries.get("agi1_eval", {}).cell_accuracy if "agi1_eval" in summaries else 0
+        }
+        
+    except Exception as e:
+        print(f"Principled evaluation failed: {e}")
+        print("Falling back to basic evaluation...")
+        agi1_results = evaluate(
+            model, "data/arc-agi-1", "evaluation", device,
+            n_samples=400, num_steps=config.num_timesteps
+        )
+    
     print(f"ARC-AGI-1: task_acc={agi1_results['task_accuracy']:.1%}, "
           f"cell_acc={agi1_results['cell_accuracy']:.1%}")
     
