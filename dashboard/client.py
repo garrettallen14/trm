@@ -46,7 +46,15 @@ class DashboardClient:
         else:
             self._http_post("/api/metrics", kwargs)
     
-    def log_epoch(self, epoch: int, train_loss: float, val_loss: Optional[float] = None, val_accuracy: Optional[float] = None):
+    def log_epoch(
+        self, 
+        epoch: int, 
+        train_loss: float, 
+        val_loss: Optional[float] = None, 
+        val_accuracy: Optional[float] = None,
+        cell_accuracy: Optional[float] = None,
+        task_accuracy: Optional[float] = None
+    ):
         """Log completed epoch to history."""
         # Calculate ETA
         epoch_time = time.time() - self._last_epoch_time
@@ -62,18 +70,25 @@ class DashboardClient:
             loss=train_loss,
             val_loss=val_loss,
             val_accuracy=val_accuracy,
+            cell_accuracy=cell_accuracy,
+            task_accuracy=task_accuracy,
             eta_seconds=eta
         )
         
         # Add to history
         if self.mode == "inprocess":
-            self.metrics_store.add_epoch_to_history(epoch, train_loss, val_loss, val_accuracy)
+            self.metrics_store.add_epoch_to_history(
+                epoch, train_loss, val_loss, val_accuracy,
+                cell_accuracy=cell_accuracy, task_accuracy=task_accuracy
+            )
         else:
             self._http_post("/api/epoch", {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
-                "val_accuracy": val_accuracy
+                "val_accuracy": val_accuracy,
+                "cell_accuracy": cell_accuracy,
+                "task_accuracy": task_accuracy
             })
     
     def get_current(self) -> dict:

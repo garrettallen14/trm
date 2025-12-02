@@ -856,7 +856,7 @@ def train(args):
               f"cell_acc={eval_results['cell_accuracy']:.1%}, "
               f"lr={current_lr:.2e}, time={epoch_time:.0f}s, oom={oom_count}")
         
-        # Dashboard epoch update
+        # Dashboard epoch update - use log_epoch for history!
         if dashboard:
             dashboard.update(
                 status="running",
@@ -869,6 +869,13 @@ def train(args):
                 total_steps=len(train_loader),
                 total_epochs=config.epochs,
                 lr=current_lr
+            )
+            # Log to history for charts
+            dashboard.log_epoch(
+                epoch=epoch,
+                train_loss=avg_loss,
+                cell_accuracy=eval_results["cell_accuracy"],
+                task_accuracy=eval_results["task_accuracy"]
             )
         
         # Save best model
