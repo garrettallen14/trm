@@ -841,7 +841,7 @@ def train(args):
         # === Evaluation on ARC-AGI-1 (every epoch) ===
         eval_results = evaluate(
             model, args.data_dir, "evaluation", device,
-            n_samples=100, num_steps=config.num_timesteps
+            n_samples=200, num_steps=config.num_timesteps  # 200 samples for less variance
         )
         
         # === Evaluation on ARC-AGI-2 (every 5th epoch) ===
