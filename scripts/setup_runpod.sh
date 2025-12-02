@@ -34,6 +34,14 @@ else
     echo "ARC-AGI-1 already exists"
 fi
 
+if [ ! -d "data/arc-agi-2" ]; then
+    echo "Cloning ARC-AGI-2..."
+    mkdir -p data
+    git clone --depth 1 https://github.com/arcprize/ARC-AGI-2.git data/arc-agi-2
+else
+    echo "ARC-AGI-2 already exists"
+fi
+
 # Verify GPU
 echo ""
 echo "=========================================="

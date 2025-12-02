@@ -31,7 +31,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
 from src.model import TinyRecursiveModel
@@ -120,13 +120,13 @@ def train(args):
         except Exception as e:
             print(f"Dashboard: failed ({e})")
     
-    # Full TRM config based on research
+    # Optimized TRM config
     config = {
         # Model
         "d_model": 512,
         "n_heads": 4,
         "n_layers": 2,
-        "n_recursions": 16,  # TRM uses 16, not 8!
+        "n_recursions": args.n_recursions,  # 8 performed best in our sweep
         
         # Training
         "lr_trunk": 1e-4,
@@ -141,12 +141,12 @@ def train(args):
         "effective_batch": args.batch_size * args.grad_accum,
         
         # Data
-        "augment_factor": args.augment_factor,  # TRM uses 100× (8 dihedrals × 12 colors)
+        "augment_factor": args.augment_factor,
         "epochs": args.epochs,
         
         # TRM-specific
         "supervision_weights": "uniform",
-        "no_grad_loops": 6,  # 6× no-grad refinement per grad step
+        "no_grad_loops": args.no_grad_loops,  # Skip for faster training
     }
     
     print("\n" + "="*60)
@@ -165,6 +165,12 @@ def train(args):
     
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nParameters: {n_params:,}")
+    
+    # Compile model for faster training (PyTorch 2.0+)
+    if args.compile:
+        print("Compiling model with torch.compile...")
+        model = torch.compile(model)
+        print("Model compiled!")
     
     # Optimizer with differential LR (critical for TRM!)
     embed_params = [p for n, p in model.named_parameters() if "embed" in n or "token" in n]
@@ -191,7 +197,7 @@ def train(args):
     scheduler = LambdaLR(optimizer, lr_lambda)
     
     # Mixed precision
-    scaler = GradScaler() if args.amp else None
+    scaler = GradScaler('cuda') if args.amp else None
     if args.amp:
         print("Using mixed precision (AMP)")
     
@@ -257,7 +263,7 @@ def train(args):
                                  n_recursions=config["no_grad_loops"])
                 
                 # === GRADIENT STEP ===
-                with autocast(enabled=args.amp):
+                with autocast('cuda', enabled=args.amp):
                     loss_dict = model.compute_loss(
                         demo_inputs, demo_outputs, test_input, test_output,
                         n_recursions=config["n_recursions"],
@@ -294,13 +300,20 @@ def train(args):
                 # Dashboard update
                 if dashboard and n_batches % 20 == 0:
                     mem_gb = torch.cuda.max_memory_allocated() / 1e9 if torch.cuda.is_available() else 0
+                    elapsed = time.time() - epoch_start
+                    samples_sec = (n_batches * config["batch_size"]) / elapsed if elapsed > 0 else 0
+                    
                     dashboard.update(
+                        status="running",
                         loss=loss.item() * config["grad_accum"],
                         epoch=epoch,
                         step=n_batches,
                         total_steps=len(train_loader),
+                        total_epochs=config["epochs"],
                         memory_gb=mem_gb,
-                        recursion_depth=config["n_recursions"]
+                        n_recursions=config["n_recursions"],
+                        lr=current_lr if 'current_lr' in dir() else config["lr_trunk"],
+                        samples_per_sec=samples_sec
                     )
                 
             except RuntimeError as e:
@@ -318,9 +331,9 @@ def train(args):
         current_lr = scheduler.get_last_lr()[0]
         
         # === TASK-LEVEL EVALUATION ===
-        # Evaluate on 50 random tasks (full eval is slow)
+        # Evaluate on HELD-OUT evaluation split (not training!)
         eval_results = evaluate_task_accuracy(
-            model, args.data_dir, "training", device,
+            model, args.data_dir, "evaluation", device,
             n_recursions=config["n_recursions"], n_samples=50
         )
         
@@ -381,21 +394,25 @@ def train(args):
     best_ckpt = torch.load(save_dir / "best_model.pt", map_location=device)
     model.load_state_dict(best_ckpt["model_state_dict"])
     
-    # Full eval on AGI-1
-    print("\nEvaluating on ARC-AGI-1 (full)...")
+    # Full eval on AGI-1 (evaluation split = held-out)
+    print("\nEvaluating on ARC-AGI-1 evaluation split (held-out)...")
     agi1_results = evaluate_task_accuracy(
-        model, "data/arc-agi-1", "training", device,
+        model, "data/arc-agi-1", "evaluation", device,
         n_recursions=config["n_recursions"]
     )
     print(f"AGI-1 Task Accuracy: {agi1_results['task_accuracy']:.1%} "
           f"({agi1_results['tasks_correct']}/{agi1_results['tasks_total']})")
     
-    # Eval on AGI-2
-    print("\nEvaluating on ARC-AGI-2 (full)...")
-    agi2_results = evaluate_task_accuracy(
-        model, "data/arc-agi-2", "training", device,
-        n_recursions=config["n_recursions"]
-    )
+    # Eval on AGI-2 (evaluation split = held-out)
+    print("\nEvaluating on ARC-AGI-2 evaluation split...")
+    try:
+        agi2_results = evaluate_task_accuracy(
+            model, "data/arc-agi-2", "evaluation", device,
+            n_recursions=config["n_recursions"]
+        )
+    except Exception as e:
+        print(f"AGI-2 eval failed (maybe not downloaded?): {e}")
+        agi2_results = {"task_accuracy": 0, "cell_accuracy": 0, "tasks_correct": 0, "tasks_total": 0}
     print(f"AGI-2 Task Accuracy: {agi2_results['task_accuracy']:.1%} "
           f"({agi2_results['tasks_correct']}/{agi2_results['tasks_total']})")
     
@@ -427,10 +444,13 @@ def main():
     parser = argparse.ArgumentParser(description="Full TRM training run")
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--grad_accum", type=int, default=8)  # Effective batch = 32
-    parser.add_argument("--augment_factor", type=int, default=100)  # TRM uses 100×
+    parser.add_argument("--batch_size", type=int, default=6)  # Higher = better GPU util
+    parser.add_argument("--grad_accum", type=int, default=5)  # Effective batch = 30
+    parser.add_argument("--augment_factor", type=int, default=20)  # 20× for fast iteration
+    parser.add_argument("--n_recursions", type=int, default=8)  # 8 was best in sweep
+    parser.add_argument("--no_grad_loops", type=int, default=0)  # Skip for speed
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
+    parser.add_argument("--compile", action="store_true", help="Use torch.compile for speed")
     parser.add_argument("--dashboard", action="store_true", help="Send metrics to dashboard")
     args = parser.parse_args()
     
