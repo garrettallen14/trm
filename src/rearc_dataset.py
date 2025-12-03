@@ -45,38 +45,31 @@ class ReARCDataset(Dataset):
             self._task_ids = []
             return
         
-        # Add RE-ARC to path (it's not pip-installable, just a module)
-        if str(rearc_path) not in sys.path:
-            sys.path.insert(0, str(rearc_path))
+        # Add RE-ARC to path (flat module structure, not a package)
+        rearc_abs = str(rearc_path.resolve())
+        if rearc_abs not in sys.path:
+            sys.path.insert(0, rearc_abs)
         
         try:
-            # RE-ARC exports generators from its __init__ or a specific module
-            # Try different import patterns
-            try:
-                from arc import generators
-                self._generators = generators
-            except ImportError:
-                try:
-                    import arc
-                    self._generators = arc.generators if hasattr(arc, 'generators') else None
-                except ImportError:
-                    # Try loading the generate_dataset function directly
-                    from arc import generate_dataset
-                    self._generate_fn = generate_dataset
-                    self._generators = "function"  # Flag to use function mode
+            # RE-ARC has flat structure: generators.py contains the generators dict
+            import generators as rearc_generators
             
-            if self._generators == "function":
-                print("RE-ARC loaded (function mode)")
-                self._task_ids = []
-            elif self._generators:
+            # generators.py should have a dict mapping task_id -> generator function
+            if hasattr(rearc_generators, 'generators'):
+                self._generators = rearc_generators.generators
                 self._task_ids = list(self._generators.keys())
                 print(f"RE-ARC loaded: {len(self._task_ids)} task generators")
             else:
-                raise ImportError("Could not load RE-ARC generators")
+                # Maybe it's the module itself with functions
+                self._task_ids = [name for name in dir(rearc_generators) 
+                                  if not name.startswith('_') and callable(getattr(rearc_generators, name))]
+                self._generators = {tid: getattr(rearc_generators, tid) for tid in self._task_ids}
+                print(f"RE-ARC loaded: {len(self._task_ids)} task generators (function mode)")
                 
         except Exception as e:
             print(f"RE-ARC import failed: {e}")
-            print("RE-ARC may have a different API. Check data/re-arc/README.md")
+            import traceback
+            traceback.print_exc()
             self._generators = None
             self._task_ids = []
     
