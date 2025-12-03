@@ -36,23 +36,47 @@ class ReARCDataset(Dataset):
     
     def _load_rearc(self):
         """Load RE-ARC generators."""
+        import sys
+        
+        rearc_path = Path("data/re-arc")
+        if not rearc_path.exists():
+            print("RE-ARC not found. Run: git clone https://github.com/michaelhodel/re-arc.git data/re-arc")
+            self._generators = None
+            self._task_ids = []
+            return
+        
+        # Add RE-ARC to path (it's not pip-installable, just a module)
+        if str(rearc_path) not in sys.path:
+            sys.path.insert(0, str(rearc_path))
+        
         try:
-            import sys
-            rearc_path = Path("data/re-arc")
-            if rearc_path.exists():
-                sys.path.insert(0, str(rearc_path))
+            # RE-ARC exports generators from its __init__ or a specific module
+            # Try different import patterns
+            try:
+                from arc import generators
+                self._generators = generators
+            except ImportError:
+                try:
+                    import arc
+                    self._generators = arc.generators if hasattr(arc, 'generators') else None
+                except ImportError:
+                    # Try loading the generate_dataset function directly
+                    from arc import generate_dataset
+                    self._generate_fn = generate_dataset
+                    self._generators = "function"  # Flag to use function mode
             
-            from arc import generators
-            
-            # Get all available task generators
-            self._task_ids = list(generators.keys())
-            self._generators = generators
-            print(f"RE-ARC loaded: {len(self._task_ids)} task generators")
-            
-        except ImportError as e:
-            print(f"RE-ARC not available: {e}")
-            print("To install: git clone https://github.com/michaelhodel/re-arc.git data/re-arc")
-            print("            cd data/re-arc && pip install -e .")
+            if self._generators == "function":
+                print("RE-ARC loaded (function mode)")
+                self._task_ids = []
+            elif self._generators:
+                self._task_ids = list(self._generators.keys())
+                print(f"RE-ARC loaded: {len(self._task_ids)} task generators")
+            else:
+                raise ImportError("Could not load RE-ARC generators")
+                
+        except Exception as e:
+            print(f"RE-ARC import failed: {e}")
+            print("RE-ARC may have a different API. Check data/re-arc/README.md")
             self._generators = None
             self._task_ids = []
     
