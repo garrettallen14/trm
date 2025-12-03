@@ -42,6 +42,27 @@ else
     echo "ARC-AGI-2 already exists"
 fi
 
+
+# Clone RE-ARC (synthetic data generation)
+if [ ! -d "data/re-arc" ]; then
+    echo "Cloning RE-ARC (synthetic data generator)..."
+    git clone https://github.com/michaelhodel/re-arc.git data/re-arc
+else
+    echo "RE-ARC already exists"
+fi
+
+
+# Generate RE-ARC synthetic data (if RE-ARC exists and data not generated)
+if [ -d "data/re-arc" ] && [ ! -d "data/re-arc-generated" ]; then
+    echo "Generating RE-ARC synthetic data (this may take a few minutes)..."
+    cd data/re-arc
+    pip install -e . 2>/dev/null || pip3 install -e . 2>/dev/null || true
+    cd ../..
+    python scripts/generate_rearc.py --num_per_task 50 --output data/re-arc-generated 2>/dev/null || echo "RE-ARC generation skipped (run manually: python scripts/generate_rearc.py)"
+else
+    echo "RE-ARC data already generated or RE-ARC not installed"
+fi
+
 # Verify GPU
 echo ""
 echo "=========================================="

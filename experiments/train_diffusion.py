@@ -31,6 +31,7 @@ import torch.optim as optim
 from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.checkpoint import checkpoint
+from torch.utils.data import DataLoader, ConcatDataset
 from tqdm import tqdm
 from einops import rearrange
 
@@ -715,15 +716,64 @@ def train(args):
         print("Using mixed precision (AMP)")
     
     # === Data ===
-    train_loader = create_dataloader(
+    from src.data import ARCDataset, collate_fn
+    
+    datasets = []
+    
+    # AGI-1 training data
+    agi1_dataset = ARCDataset(
         args.data_dir,
         split="training",
-        batch_size=config.batch_size,
         augment=True,
-        augment_factor=config.augment_factor,
-        num_workers=4
+        augment_factor=config.augment_factor
     )
-    print(f"Training samples: {len(train_loader.dataset):,}")
+    datasets.append(agi1_dataset)
+    print(f"AGI-1 training: {len(agi1_dataset):,} samples")
+    
+    # AGI-2 training data (if requested)
+    if args.include_agi2:
+        agi2_path = Path("data/arc-agi-2")
+        if (agi2_path / "data" / "training").exists():
+            agi2_dataset = ARCDataset(
+                str(agi2_path),
+                split="training",
+                augment=True,
+                augment_factor=config.augment_factor
+            )
+            datasets.append(agi2_dataset)
+            print(f"AGI-2 training: {len(agi2_dataset):,} samples")
+    
+    # RE-ARC synthetic data (if requested and available)
+    if args.include_rearc:
+        rearc_path = Path("data/re-arc-generated")
+        if (rearc_path / "training").exists():
+            rearc_dataset = ARCDataset(
+                str(rearc_path),
+                split="training",
+                augment=True,
+                augment_factor=max(config.augment_factor // 5, 1)  # Less augmentation for synthetic
+            )
+            datasets.append(rearc_dataset)
+            print(f"RE-ARC synthetic: {len(rearc_dataset):,} samples")
+        else:
+            print("RE-ARC data not found. Run: python scripts/generate_rearc.py")
+    
+    # Combine datasets
+    if len(datasets) > 1:
+        combined_dataset = ConcatDataset(datasets)
+    else:
+        combined_dataset = datasets[0]
+    
+    train_loader = DataLoader(
+        combined_dataset,
+        batch_size=config.batch_size,
+        shuffle=True,
+        num_workers=4,
+        collate_fn=collate_fn,
+        pin_memory=True,
+        persistent_workers=True
+    )
+    print(f"Total training samples: {len(combined_dataset):,}")
     
     # === Save Directory ===
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1025,6 +1075,8 @@ def main():
     # Data
     parser.add_argument("--data_dir", type=str, default="data/arc-agi-1")
     parser.add_argument("--save_dir", type=str, default="experiments/runs")
+    parser.add_argument("--include_agi2", action="store_true", help="Include AGI-2 training data")
+    parser.add_argument("--include_rearc", action="store_true", help="Include RE-ARC synthetic data")
     
     # Efficiency
     parser.add_argument("--amp", action="store_true", help="Use mixed precision")
