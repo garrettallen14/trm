@@ -743,20 +743,18 @@ def train(args):
             datasets.append(agi2_dataset)
             print(f"AGI-2 training: {len(agi2_dataset):,} samples")
     
-    # RE-ARC synthetic data (if requested and available)
+    # RE-ARC synthetic data (generated on-the-fly, no pre-generation needed!)
     if args.include_rearc:
-        rearc_path = Path("data/re-arc-generated")
-        if (rearc_path / "training").exists():
-            rearc_dataset = ARCDataset(
-                str(rearc_path),
-                split="training",
-                augment=True,
-                augment_factor=max(config.augment_factor // 5, 1)  # Less augmentation for synthetic
-            )
-            datasets.append(rearc_dataset)
-            print(f"RE-ARC synthetic: {len(rearc_dataset):,} samples")
-        else:
-            print("RE-ARC data not found. Run: python scripts/generate_rearc.py")
+        try:
+            from src.rearc_dataset import get_rearc_dataset
+            rearc_dataset = get_rearc_dataset(size=20000)  # 20K fresh samples per epoch
+            if rearc_dataset:
+                datasets.append(rearc_dataset)
+                print(f"RE-ARC synthetic: {len(rearc_dataset):,} samples (on-the-fly)")
+            else:
+                print("RE-ARC not available. Install: git clone https://github.com/michaelhodel/re-arc.git data/re-arc && cd data/re-arc && pip install -e .")
+        except Exception as e:
+            print(f"RE-ARC failed: {e}")
     
     # Combine datasets
     if len(datasets) > 1:
